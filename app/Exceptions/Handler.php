@@ -7,7 +7,7 @@ use App\Helpers\Helper;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\AuthenticationException;
 use ArieTimmerman\Laravel\SCIMServer\Exceptions\SCIMException;
-use Log;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 use JsonException;
 use Carbon\Exceptions\InvalidFormatException;
@@ -44,8 +44,8 @@ class Handler extends ExceptionHandler
     public function report(Throwable $exception)
     {
         if ($this->shouldReport($exception)) {
-            if (class_exists(\Log::class)) {
-                \Log::error($exception);
+            if (class_exists(Log::class)) {
+                Log::error($exception);
             }
             return parent::report($exception);
         }
@@ -75,7 +75,12 @@ class Handler extends ExceptionHandler
 
         // Handle SCIM exceptions
         if ($e instanceof SCIMException) {
-            return response()->json(Helper::formatStandardApiResponse('error', null, 'Invalid SCIM Request'), 400);
+            try {
+                $e->report(); // logs as 'debug', so shouldn't get too noisy
+            } catch(\Exception $reportException) {
+                //do nothing
+            }
+            return $e->render($request); // ALL SCIMExceptions have the 'render()' method
         }
 
         // Handle standard requests that fail because Carbon cannot parse the date on validation (when a submitted date value is definitely not a date)
@@ -117,6 +122,27 @@ class Handler extends ExceptionHandler
         }
 
 
+        // This is traaaaash but it handles models that are not found while using route model binding :(
+        // The only alternative is to set that at *each* route, which is crazypants
+        if ($e instanceof \Illuminate\Database\Eloquent\ModelNotFoundException) {
+            $model_name = last(explode('\\', $e->getModel()));
+            $route = str_plural(strtolower(last(explode('\\', $e->getModel())))).'.index';
+
+            // Sigh.
+            if ($route == 'assets.index') {
+                $route = 'hardware.index';
+            } elseif ($route == 'reporttemplates.index') {
+                $route = 'reports/custom';
+            } elseif ($route == 'assetmodels.index') {
+                $route = 'models.index';
+            } elseif ($route == 'predefinedkits.index') {
+                $route = 'kits.index';
+            }
+
+            return redirect()
+                ->route($route)
+                ->withError(trans('general.generic_model_not_found', ['model' => $model_name]));
+        }
 
 
         if ($this->isHttpException($e) && (isset($statusCode)) && ($statusCode == '404' )) {
@@ -143,6 +169,11 @@ class Handler extends ExceptionHandler
         }
 
         return redirect()->guest('login');
+    }
+
+    protected function invalidJson($request, ValidationException $exception)
+    {
+        return response()->json(Helper::formatStandardApiResponse('error', null, $exception->errors()), 200);
     }
 
 

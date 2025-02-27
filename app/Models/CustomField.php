@@ -7,9 +7,8 @@ use EasySlugger\Utf8Slugger;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\Rule;
-use Schema;
+use Illuminate\Support\Facades\Schema;
 use Watson\Validating\ValidatingTrait;
-
 class CustomField extends Model
 {
     use HasFactory;
@@ -53,6 +52,13 @@ class CustomField extends Model
         'element' => 'required|in:text,listbox,textarea,checkbox,radio',
         'field_encrypted' => 'nullable|boolean',
         'auto_add_to_fieldsets' => 'boolean',
+        'show_in_listview' => 'boolean',
+        'show_in_requestable_list' => 'boolean',
+        'show_in_email' => 'boolean',
+    ];
+
+    protected $casts = [
+        'show_in_requestable_list'  => 'boolean',
     ];
 
     /**
@@ -71,7 +77,9 @@ class CustomField extends Model
         'is_unique',
         'display_in_user_view',
         'auto_add_to_fieldsets',
-
+        'show_in_listview',
+        'show_in_email',
+        'show_in_requestable_list',
     ];
 
     /**
@@ -141,11 +149,6 @@ class CustomField extends Model
                     return true;
                 }
 
-                // This is just a dumb thing we have to include because Laraval/Doctrine doesn't
-                // play well with enums or a table that EVER had enums. :(
-                $platform = Schema::getConnection()->getDoctrineSchemaManager()->getDatabasePlatform();
-                $platform->registerDoctrineTypeMapping('enum', 'string');
-
                 // Rename the field if the name has changed
                 Schema::table(self::$table_name, function ($table) use ($custom_field) {
                     $table->renameColumn($custom_field->convertUnicodeDbSlug($custom_field->getOriginal('name')), $custom_field->convertUnicodeDbSlug());
@@ -179,6 +182,11 @@ class CustomField extends Model
     public function fieldset()
     {
         return $this->belongsToMany(\App\Models\CustomFieldset::class);
+    }
+   
+    public function assetModels()
+    {
+       return $this->fieldset()->with('models')->get()->pluck('models')->flatten()->unique('id'); 
     }
 
     /**
@@ -237,8 +245,6 @@ class CustomField extends Model
     /**
      * Gets the DB column name.
      *
-     * @todo figure out if this is still needed? I don't know WTF it's for.
-     *
      * @author [A. Gianotto] [<snipe@snipe.net>]
      * @since [v3.0]
      * @return string
@@ -296,7 +302,7 @@ class CustomField extends Model
     public function formatFieldValuesAsArray()
     {
         $result = [];
-        $arr = preg_split('/\\r\\n|\\r|\\n/', $this->field_values);
+        $arr = preg_split('/\\r\\n|\\r|\\n/', $this->field_values ?? '');
 
         if (($this->element != 'checkbox') && ($this->element != 'radio')) {
             $result[''] = 'Select '.strtolower($this->format);
